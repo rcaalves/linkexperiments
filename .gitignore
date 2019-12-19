@@ -6,11 +6,14 @@
 *.ko
 *.obj
 *.elf
+*.sky
+obj_sky/
 
 # Linker output
 *.ilk
 *.map
 *.exp
+symbols.?
 
 # Precompiled Headers
 *.gch
