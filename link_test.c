@@ -54,6 +54,7 @@
 // Global variables
 static linkaddr_t dest_addr = {{0, 0}};
 static uint8_t initialized = 0;
+static uint8_t clicked = 0;
 static process_event_t myev_num;
 
 /*---------------------------------------------------------------------------*/
@@ -103,11 +104,16 @@ PROCESS_THREAD(link_test_process, ev, data)
     static int counter = 0;
     char message[10];
 
-    if(initialized) {
+    if(initialized || clicked) {
       etimer_set(&et, TRANS_INTER);
     }
 
     PROCESS_WAIT_EVENT();
+
+    if (ev == sensors_event && data == &button_sensor) {
+      printf("BTN\n");
+      clicked = !clicked;
+    }
 
     if (ev == myev_num) {
       etimer_set(&et, TRANS_INTER/2);
@@ -120,11 +126,11 @@ PROCESS_THREAD(link_test_process, ev, data)
       // To change packet payload size
       // packetbuf_set_datalen(50);
 
-      printf("%X.%X>%X.%X|%s",
-        linkaddr_node_addr.u8[0], linkaddr_node_addr.u8[1],
-        dest_addr.u8[0], dest_addr.u8[1],
-        (char*) packetbuf_dataptr());
-        printf("\n");
+      // printf("%X.%X>%X.%X|%s",
+      //   linkaddr_node_addr.u8[0], linkaddr_node_addr.u8[1],
+      //   dest_addr.u8[0], dest_addr.u8[1],
+      //   (char*) packetbuf_dataptr());
+      //   printf("\n");
       if (linkaddr_cmp(&dest_addr, &linkaddr_null)) {
         broadcast_send(&broadcast);
       } else {
