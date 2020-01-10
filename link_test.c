@@ -56,6 +56,7 @@ static linkaddr_t dest_addr = {{0, 0}};
 static uint8_t initialized = 0;
 static uint8_t clicked = 0;
 static process_event_t myev_num;
+static int counter = 0;
 
 /*---------------------------------------------------------------------------*/
 PROCESS(link_test_process, "Link test");
@@ -73,6 +74,7 @@ recv_uc(struct unicast_conn *c, const linkaddr_t *from)
   printf("\n");
 
   if (!initialized) {
+    printf("INIT %d\n", counter);
     initialized = 1;
     linkaddr_copy(&dest_addr, from);
   }
@@ -100,8 +102,9 @@ PROCESS_THREAD(link_test_process, ev, data)
   unicast_open(&uc, 146, &unicast_callbacks);
   broadcast_open(&broadcast, 129, &broadcast_call);
 
+  printf("My addr: %X.%X\n",linkaddr_node_addr.u8[0],linkaddr_node_addr.u8[1]);
+
   while(1) {
-    static int counter = 0;
     char message[10];
 
     if(initialized || clicked) {
