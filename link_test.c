@@ -96,7 +96,10 @@ PROCESS_THREAD(link_test_process, ev, data)
 
   SENSORS_ACTIVATE(button_sensor);
   // To change radio TX power
-  // cc2420_set_txpower(3);
+  #ifdef CUSTOM_TX_POWER
+  cc2420_set_txpower(CUSTOM_TX_POWER);
+  printf("CUSTOM_TX_POWER %d\n", CUSTOM_TX_POWER);
+  #endif
 
   myev_num = process_alloc_event();
   unicast_open(&uc, 146, &unicast_callbacks);
