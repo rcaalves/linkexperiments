@@ -56,7 +56,7 @@ static linkaddr_t dest_addr = {{0, 0}};
 static uint8_t initialized = 0;
 static uint8_t clicked = 0;
 static process_event_t myev_num;
-static int counter = 0;
+static unsigned int counter = 0;
 
 /*---------------------------------------------------------------------------*/
 PROCESS(link_test_process, "Link test");
@@ -74,7 +74,7 @@ recv_uc(struct unicast_conn *c, const linkaddr_t *from)
   printf("\n");
 
   if (!initialized) {
-    printf("INIT %d\n", counter);
+    printf("INIT %u\n", counter);
     initialized = 1;
     linkaddr_copy(&dest_addr, from);
   }
@@ -110,7 +110,18 @@ PROCESS_THREAD(link_test_process, ev, data)
   while(1) {
     char message[10];
 
-    if(initialized || clicked) {
+    if(clicked > 1){
+      leds_on(LEDS_GREEN);
+      while (1) { PROCESS_WAIT_EVENT(); }
+    }
+
+    if(counter + 1 < counter){
+      printf("Counter overflow\n");
+      leds_on(LEDS_YELLOW);
+      while (1) { PROCESS_WAIT_EVENT(); }
+    }
+
+    if((initialized || clicked) && etimer_expired(&et)) {
       etimer_set(&et, TRANS_INTER);
     }
 
@@ -118,7 +129,9 @@ PROCESS_THREAD(link_test_process, ev, data)
 
     if (ev == sensors_event && data == &button_sensor) {
       printf("BTN\n");
-      clicked = !clicked;
+      clicked++;
+      printf("My addr: %X.%X\n",linkaddr_node_addr.u8[0],linkaddr_node_addr.u8[1]);
+      printf("TX_POWER %d\n", cc2420_get_txpower());
     }
 
     if (ev == myev_num) {
@@ -126,7 +139,7 @@ PROCESS_THREAD(link_test_process, ev, data)
       PROCESS_WAIT_EVENT();
     }
     if (etimer_expired(&et)) {
-      sprintf(message, "%4d", ++counter);
+      sprintf(message, "%4u", ++counter);
 
       packetbuf_copyfrom(message, strlen(message)+1);
       // To change packet payload size
