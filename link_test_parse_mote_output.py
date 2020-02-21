@@ -36,13 +36,15 @@ def parsefile(filename):
   for line in f:
     s = expression.search(line)
     timestamp, src, dst, seqno, lqi, rssi = (None,) * 6
-    line_no_ts = line.strip()[line.find(" "):]
+    line_no_ts = line.strip()[line.strip().find(" "):]
 
-    if line_no_ts.strip() == "BTN":
+    if "BTN" in line_no_ts:
+      if "BTN" in extra_info:
+        break
       extra_info += ["BTN"]
 
-    if line_no_ts.strip().startswith("INIT"):
-      init_number = int(line_no_ts.strip().strip("INIT"))+1
+    if "INIT" in line_no_ts:
+      init_number = int(line_no_ts[line_no_ts.find("INIT ")+len("INIT "):])+1
       extra_info += [init_number, previous_seqno if previous_seqno != None else 0]
 
     if s != None:
@@ -136,6 +138,7 @@ def kpe(t, k_plus_vector, k_minus_vector):
 
 def asimmetry_metric_kpe(s0, s1):
   should_print = True
+  kpe_dict_values = {}
   max_i = min(len(s0),len(s1))
   s0 = s0[:max_i]
   s1 = s1[:max_i]
@@ -200,8 +203,28 @@ def asimmetry_metric_kpe(s0, s1):
     print ()
   return m
 
+def asimmetry_metric_simplified(s0, s1):
+  max_i = min(len(s0),len(s1))
+  s0 = s0[:max_i]
+  s1 = s1[:max_i]
+  window = 5
+  deltas = []
+  for i in lrange(window//2, max_i - window//2):
+    delta = 0.0
+    for j in lrange(i-window//2, i+1+window//2):
+      if ( (s0[j] == None and s1[j] != None) or
+           (s0[j] != None and s1[j] == None) ):
+         delta += 1
+    deltas += [delta/window]
+  # print (deltas)
+  return np.mean(deltas)
+
+
 def interpolate(d, interval=1, window=2, avg_method="Even"):
+  if len(d) == 0:
+    return {}, []
   max_i = max(d)
+
   out_dict = {}
   out_list = []
 
@@ -210,7 +233,7 @@ def interpolate(d, interval=1, window=2, avg_method="Even"):
 
   after_i = [1]
   after_window = []
-  while len(after_window) < window:
+  while len(after_window) < window and after_i[-1] <= max_i:
     if after_i[-1] in d:
       after_window += [d[after_i[-1]]]
       after_i += [after_i[-1]+1]
@@ -270,6 +293,8 @@ def interpolate(d, interval=1, window=2, avg_method="Even"):
   return out_dict, out_list
 
 def fill_with_none_and_cap(seq):
+  if not len(seq): return []
+
   prev = seq[0]
   seq_temp = [prev]
   for i in seq[1:]:
@@ -283,6 +308,7 @@ def fill_with_none_and_cap(seq):
   return seq_temp
 
 def insert_nones(addy, model):
+  if addy == []: addy = [None] * len(model)
   i = 0
   while i < len(model):
     if model[i] == None and addy[i] != None:
@@ -303,7 +329,15 @@ def pair_up(seqs0, seqs1):
   # print (s0)
   # print (s1)
 
-  if extra_info0[0] == "BTN" and extra_info1[0] == "BTN":
+  if s0 == []:
+    # ???
+    first0 = 1
+    first1 = 1
+  elif s1 == []:
+    # ???
+    first0 = 1
+    first1 = 1
+  elif extra_info0[0] == "BTN" and extra_info1[0] == "BTN":
     # simultaneos starters
     # find which element should be the first in the sequence
     init0, seqno0 = extra_info0[1], extra_info0[2]
@@ -340,14 +374,21 @@ def pair_up(seqs0, seqs1):
     first1 -= 1
   # print first0, first1
 
-  if first0 > s0[0]:
+  if s0 == [] and s1 == []:
+    return (s0, l0, r0), (s1, l1, r1)
+
+  if s0 == []:
+    s0 = [None] * s1[-1]
+  elif first0 > s0[0]:
     # trim sequence
     s0 = lfilter(lambda x: x is None or x>=first0, s0)
   elif first0 < s0[0]:
     # add trailling None
     s0 = [None] * (s0[0] - first0) + s0
 
-  if first1 > s1[0]:
+  if s1 == []:
+    s1 = [None] * s0[-1]
+  elif first1 > s1[0]:
     # trim sequence
     s1 = lfilter(lambda x: x is None or x>=first1, s1)
   elif first1 < s1[0]:
@@ -411,6 +452,12 @@ def test_pair_up():
   (n1, _, _), (n0, _, _) = pair_up((n0,n0,n0,(1,8)), (n1,n1,n1,("BTN",9,1)))
   print (lzip(n1, n0) == [ (None, 1), (10, 2), (None, 3), (12, 4), (13, 5) ])
 
+  # unidirectional
+  n0 = [4, 7]
+  n1 = []
+  (n1, _, _), (n0, _, _) = pair_up((n0,n0,n0,tuple()), (n1,n1,n1,tuple()))
+  print (lzip(n1, n0) == [(None, None), (None, None), (None, None), (4, None), (None, None), (None, None), (7, None)])
+
 
 def test_asimmetry_metric():
   mylen = 4
@@ -470,7 +517,7 @@ def test_interpolate():
                        2.25, 2.25, 2.25, 2.25, 2.25, 1.0, 1.75, 1.0, 1.0, 1.0])
 ################################################################################
 
-def parse_twofiles(fname0, fname1, max_data_points=1000):
+def parse_twofiles(fname0, fname1, n_data_points=None):
   should_plot = False
   should_print = False
   # fname0 = "node0.log"
@@ -486,18 +533,19 @@ def parse_twofiles(fname0, fname1, max_data_points=1000):
   # print (lmap(len, (n0 + n1)), len(n0))
   # print (lzip(s0,s1)[:10], len(s0))
 
-  s0 = s0[:min(len(s0),max_data_points)]
-  l0 = l0[:min(len(l0),max_data_points)]
-  r0 = r0[:min(len(r0),max_data_points)]
-  s1 = s1[:min(len(s1),max_data_points)]
-  l1 = l1[:min(len(l1),max_data_points)]
-  r1 = r1[:min(len(r1),max_data_points)]
+  if n_data_points is not None:
+    s0 = s0[:min(len(s0),n_data_points)] + [None] * (n_data_points - len(s0))
+    l0 = l0[:min(len(l0),n_data_points)] + [None] * (n_data_points - len(l0))
+    r0 = r0[:min(len(r0),n_data_points)] + [None] * (n_data_points - len(r0))
+    s1 = s1[:min(len(s1),n_data_points)] + [None] * (n_data_points - len(s1))
+    l1 = l1[:min(len(l1),n_data_points)] + [None] * (n_data_points - len(l1))
+    r1 = r1[:min(len(r1),n_data_points)] + [None] * (n_data_points - len(r1))
 
   ############
   # Delivery #
   ############
-  pdr0 = 100.0*len(lfilter(lambda x: x!=None, n0[0]))/len(n0[0])
-  pdr1 = 100.0*len(lfilter(lambda x: x!=None, n1[0]))/len(n1[0])
+  pdr0 = 100.0*len(lfilter(lambda x: x!=None, s0))/len(s0)
+  pdr1 = 100.0*len(lfilter(lambda x: x!=None, s1))/len(s1)
   if should_print: print ("Delivery rate 0:", pdr0)
   if should_print: print ("Delivery rate 1:", pdr1)
 
@@ -512,6 +560,7 @@ def parse_twofiles(fname0, fname1, max_data_points=1000):
   asimmetry_metric = -1
   asimmetry_metric = asimmetry_metric_kpe(s0, s1)
   if should_print: print ("asimmetry_metric based on expected instant probabilities:", asimmetry_metric)
+  asimmetry_metric2 = asimmetry_metric_simplified(s0, s1)
 
   if should_plot:
     plt.plot(lrange(len(s0)), lmap(lambda x: None if x == None else 1.1, s0), label="s0", marker='o', color = "blue")
@@ -538,7 +587,10 @@ def parse_twofiles(fname0, fname1, max_data_points=1000):
   l0_interpol_list = l0_interpol_list[:min(len(l0_interpol_list), len(l1_interpol_list))]
   l1_interpol_list = l1_interpol_list[:min(len(l0_interpol_list), len(l1_interpol_list))]
 
-  l_pearson, l_pearson_p = scipy.stats.pearsonr(l0_interpol_list, l1_interpol_list)
+  if len(l0_interpol_list) > 2 and len(l1_interpol_list) > 2:
+    l_pearson, l_pearson_p = scipy.stats.pearsonr(l0_interpol_list, l1_interpol_list)
+  else:
+    l_pearson, l_pearson_p = None, None
   if should_print: print ("LQI pearson index:", l_pearson, l_pearson_p)
 
   l0_avg, l0_stdev = lmap(lambda x: (np.mean(x), np.std(x)), [lfilter(lambda x: x != None, l0)])[0]
@@ -577,7 +629,10 @@ def parse_twofiles(fname0, fname1, max_data_points=1000):
   r0_interpol_list = r0_interpol_list[:min(len(r0_interpol_list), len(r1_interpol_list))]
   r1_interpol_list = r1_interpol_list[:min(len(r0_interpol_list), len(r1_interpol_list))]
 
-  r_pearson, r_pearson_p = scipy.stats.pearsonr(r0_interpol_list, r1_interpol_list)
+  if len(r0_interpol_list) > 2 and len(r1_interpol_list) > 2:
+    r_pearson, r_pearson_p = scipy.stats.pearsonr(r0_interpol_list, r1_interpol_list)
+  else:
+    r_pearson, r_pearson_p = None, None
   if should_print: print ("RSSI pearson index:", r_pearson, r_pearson_p)
 
   r0_avg, r0_stdev = lmap(lambda x: (np.mean(x), np.std(x)), [lfilter(lambda x: x != None, r0)])[0]
@@ -600,7 +655,7 @@ def parse_twofiles(fname0, fname1, max_data_points=1000):
     plt.ylabel('r1')
     plt.show()
 
-  return (len(s0), asimmetry_metric, pdr0, pdr1, abs(pdr0-pdr1),
+  return (len(s0), asimmetry_metric, asimmetry_metric2, pdr0, pdr1, abs(pdr0-pdr1),
           delivery_streak_avg0, delivery_streak_avg1,
           delivery_streak_stdev0, delivery_streak_stdev1,
           loss_streak_avg0, loss_streak_avg1,
@@ -619,10 +674,11 @@ if __name__ == "__main__":
   # exit()
 
   distance = ("moderate", "close", "far")
-  power = ("3", ) # PA-LEVEL, value set at cc2420_set_txpower()
-  relative_position = ("upup", "updown")
+  power = ("1x1", "1x2" )#"3x1", "3x3", ) # PA-LEVEL, value set at cc2420_set_txpower()
+  # relative_position = ("upup", "updown")
+  relative_position = ("BxT", "TxB", "LxR")
   location = ("indoor", )#"outdoor")
-  reps = lmap(str, range(1,4))
+  reps = lmap(str, range(1,3))
   factors = (distance, power, relative_position, location, reps)
   identifiers = ("D", "P", "R", "L", "i")
   identifiers_labels = {"D":"distance", "P":"power", "R":"relative position",
@@ -640,13 +696,13 @@ if __name__ == "__main__":
   # filename format: D-${D}_P-${P}_R-${R}_L-${L}_i-${i}_node${node}.log
   files_prefixes = sorted(mix(factors))
   for i in files_prefixes:
-    print (i)
-  # quit()
+    print ("\t",i)
+  print ()
 
-  out_file = open("link_test_result.csv", 'w', encoding="ascii")
+  out_file = open("_link_test_result.csv", 'w', encoding="ascii")
 
   headers = tuple(map(identifiers_labels.get, identifiers)) + (
-          "# points", "Assimetry metric", "Avg delivery 0",
+          "# points", "Assimetry metric", "Assimetry metric simplified", "Avg delivery 0",
           "Avg delivery 1", "Avg delivery diff",
           "Avg delivery streak 0", "Avg delivery streak 1",
           "Stdev delivery streak 0", "Stdev delivery streak 1",
@@ -662,7 +718,7 @@ if __name__ == "__main__":
   for prefix in files_prefixes:
     try:
       print ("Processing:", prefix + "node0.log", prefix + "node1.log")
-      result = parse_twofiles(prefix + "node0.log", prefix + "node1.log", max_data_points=1200)
+      result = parse_twofiles(prefix + "node0.log", prefix + "node1.log", n_data_points=36000)
       print (";".join(map(str,result)))
       out_file.write(prefix.replace("_",";") + u";".join(map(str,result)) + "\n")
     except IOError as e:
