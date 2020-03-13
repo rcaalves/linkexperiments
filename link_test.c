@@ -40,7 +40,10 @@
 #include "contiki.h"
 #include "net/rime/rime.h"
 
+#if TMOTE_SKY
 #include "dev/cc2420/cc2420.h"
+#endif
+#include "core/net/netstack.h"
 #include "dev/button-sensor.h"
 #include "dev/leds.h"
 
@@ -65,13 +68,12 @@ AUTOSTART_PROCESSES(&link_test_process);
 static void
 recv_uc(struct unicast_conn *c, const linkaddr_t *from)
 {
-  printf("%X.%X>%X.%X|%sL%dR%d",
+  printf("%X.%X>%X.%X|%sL%dR%d\n",
   from->u8[0], from->u8[1],
    linkaddr_node_addr.u8[0], linkaddr_node_addr.u8[1],
 	 (char*) packetbuf_dataptr(),
    packetbuf_attr(PACKETBUF_ATTR_LINK_QUALITY),
    packetbuf_attr(PACKETBUF_ATTR_RSSI)+RSSI_OFFSET);
-  printf("\n");
 
   if (!initialized) {
     printf("INIT %u\n", counter);
@@ -96,10 +98,14 @@ PROCESS_THREAD(link_test_process, ev, data)
 
   SENSORS_ACTIVATE(button_sensor);
   // To change radio TX power
-  #ifdef CUSTOM_TX_POWER
+#ifdef CUSTOM_TX_POWER
+#if TMOTE_SKY
   cc2420_set_txpower(CUSTOM_TX_POWER);
+#else
+  NETSTACK_RADIO.set_value(RADIO_PARAM_TXPOWER, CUSTOM_TX_POWER);
+#endif /* TMOTE_SKY */
   printf("CUSTOM_TX_POWER %d\n", CUSTOM_TX_POWER);
-  #endif
+#endif /* CUSTOM_TX_POWER */
 
   myev_num = process_alloc_event();
   unicast_open(&uc, 146, &unicast_callbacks);
@@ -131,7 +137,13 @@ PROCESS_THREAD(link_test_process, ev, data)
       printf("BTN\n");
       clicked++;
       printf("My addr: %X.%X\n",linkaddr_node_addr.u8[0],linkaddr_node_addr.u8[1]);
+#if TMOTE_SKY
       printf("TX_POWER %d\n", cc2420_get_txpower());
+#else
+      radio_value_t v;
+      NETSTACK_RADIO.get_value(RADIO_PARAM_TXPOWER, &v);
+      printf("TX_POWER %d\n", v);
+#endif
     }
 
     if (ev == myev_num) {
