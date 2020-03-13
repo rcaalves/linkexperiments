@@ -16,6 +16,10 @@ powers = set()
 positions = set()
 distances = set()
 
+metrics = ("am", "ams", "pdr0", "pdr1")
+index = (0, 1, 2, 3)
+captions = ("Asymmetry metric values", "Asymmetry metric values", "Packet delivery Node 2", "Packet delivery Node 1")
+
 for line in f:
   (distance, power, position, location, iteration, points, assim_metric,
   assim_metric_simplified, avg_delivery0, avg_delivery1, avg_delivery_diff,
@@ -29,7 +33,7 @@ for line in f:
   distance = distance[1+distance.find("-"):]
   distance = str.upper(distance[0])
 
-  values[power][position][distance] = [assim_metric, assim_metric_simplified]
+  values[power][position][distance] = [assim_metric, assim_metric_simplified, avg_delivery0, avg_delivery1]
 
   powers.add(power)
   positions.add(position)
@@ -40,67 +44,76 @@ powers = sorted(powers)
 positions = list(positions)
 # distances = sorted(distances)
 
-for power in powers:
-  fout = file("table_"+power+".tex", 'w')
-  fout.write(r"""
+for m_name, i in zip(metrics, index):
+  print m_name
+  for power in powers:
+    fout = file("table_"+m_name+"_"+power+".tex", 'w')
+    fout.write(r"""
 \begin{table}[htb]
 \centering
 \begin{tabular}{cccccc}
 \cline{3-5}
 """)
-  print power
+    print power
 
-  for position in positions:
-    if position == positions[-1]:
-      fout.write(r"""\multirow{-3}{*}{Positioning} &""")
-    else:
-      fout.write(r"""                              &""")
-    fout.write(r"""\multicolumn{1}{c|}{""")
-    fout.write(position)
-    fout.write(r"""} & """)
-    print position,
-    for distance in distances:
-      m = values[power][position][distance][1]
-      if m != None:
-        m = float(m)
-        # print power, position, distance
-        fout.write(r"""\multicolumn{1}{c|}{\cellcolor[HTML]{""")
-        fout.write(whiteToBlack(m))
-        fout.write(r"""}{\color[HTML]""")
-        if m > 0.4:
-          fout.write(r"{FFFFFF} \textbf{")
-        else:
-          fout.write("{000000}          ")
-        fout.write("%.2f" % (m,))
-        if m > 0.4: fout.write("}")
-        fout.write(r""" }} & """)
+    for position in positions:
+      if position == positions[-1]:
+        fout.write(r"""\multirow{-3}{*}{Positioning} &""")
       else:
-        fout.write(r"""\multicolumn{1}{c|}{\cellcolor[HTML]{FFFFFF}{\color[HTML]{000000} - }} & """)
-      print values[power][position][distance][1],
-    if position == positions[-1]:
-      fout.write(r"""\multirow{-3}{*}{\includegraphics[height=40pt]{rect.png}} \\ \cline{3-5}""")
-    else:
-      fout.write(r"""                   \\ \cline{3-5}""")
-    fout.write("\n")
-    print
+        fout.write(r"""                              &""")
+      fout.write(r"""\multicolumn{1}{c|}{""")
+      fout.write(position)
+      fout.write(r"""} & """)
+      print position,
+      for distance in distances:
+        m = values[power][position][distance][i]
+        if m != None:
+          m = float(m)
+          if "pdr" in m_name:
+            m/=100
+          # print power, position, distance
+          fout.write(r"""\multicolumn{1}{c|}{\cellcolor[HTML]{""")
+          fout.write(whiteToBlack(m))
+          fout.write(r"""}{\color[HTML]""")
+          if m > 0.4:
+            fout.write(r"{FFFFFF} \textbf{")
+          else:
+            fout.write("{000000}          ")
+          fout.write("%.2f" % (m,))
+          if m > 0.4: fout.write("}")
+          fout.write(r""" }} & """)
+        else:
+          fout.write(r"""\multicolumn{1}{c|}{\cellcolor[HTML]{FFFFFF}{\color[HTML]{000000} - }} & """)
+        print m,
+      if position == positions[-1]:
+        fout.write(r"""\multirow{-3}{*}{\includegraphics[height=40pt]{rect.png}} \\ \cline{3-5}""")
+      else:
+        fout.write(r"""                   \\ \cline{3-5}""")
+      fout.write("\n")
+      print
 
-  fout.write(r""" & & """)
-  print "\t",
-  for distance in distances:
-    fout.write(distance)
-    fout.write(r""" & """)
-    print distance,
-  fout.write(r"""\\
+    fout.write(r""" & & """)
+    print "\t",
+    for distance in distances:
+      fout.write(distance)
+      fout.write(r""" & """)
+      print distance,
+    fout.write(r"""\\
  & & \multicolumn{3}{c}{Distances} &
 \end{tabular}
-\caption{Asymmetry metric values -- """)
-  fout.write(power.replace("P-", "Power combination "))
-  fout.write(r"""}
+""")
+    fout.write(r"\caption{")
+    fout.write(captions[i] + " -- ")
+    fout.write(power.replace("P-", "Power combination "))
+    fout.write("}\n")
+    fout.write(r"\label{tab:")
+    fout.write(m_name+"_"+power)
+    fout.write(r"""}
 \end{table}
 """)
-  print
-  print
-  fout.close()
+    print
+    print
+    fout.close()
 
 
   # print whiteToBlack(float(assim_metric_simplified)), assim_metric_simplified
