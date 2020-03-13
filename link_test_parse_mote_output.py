@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import math
 import numpy as np
 import scipy.stats
+import random
 
 def parsefile(filename):
   f = open(filename, 'r', encoding="latin1")
@@ -15,8 +16,8 @@ def parsefile(filename):
   # Line example: 1576792544 E5.3B>C7.49| 304L106R73
   expression = re.compile(r"""^
     (?P<TIME>\d+)\s
-    (?P<SRC>[0-9a-fA-F]{2}\.[0-9a-fA-F]{2})>
-    (?P<DST>[0-9a-fA-F]{2}\.[0-9a-fA-F]{2})\|
+    (?P<SRC>[0-9a-fA-F]{1,2}\.[0-9a-fA-F]{1,2})>
+    (?P<DST>[0-9a-fA-F]{1,2}\.[0-9a-fA-F]{1,2})\|
     \s*(?P<SEQNO>\d+)
     L(?P<LQI>\d+)
     R(?P<RSSI>\d+)$
@@ -106,12 +107,17 @@ def average_delivery_streak(s):
   return np.mean(delivery_streaks), np.std(delivery_streaks)
 
 kpe_dict_values = {}
+MAX_KPE_DICT_MEM = 8*1024*1024*1024
+
 def kpe_dict2(t, k_plus_vector, k_minus_vector):
   k_plus_t = 0
   k_minus_t = 0
 
+  if (sys.getsizeof(kpe_dict_values) > MAX_KPE_DICT_MEM):
+    kpe_dict_values.clear()
+
   for (m, s) in k_plus_vector:
-    m_shifted, t_shifted = 0, m - t
+    m_shifted, t_shifted = 0, abs(m - t)
     if (m_shifted,s,t_shifted) in kpe_dict_values:
       # print "kaching 2"
       v = kpe_dict_values[(m_shifted, s, t_shifted)]
@@ -121,7 +127,7 @@ def kpe_dict2(t, k_plus_vector, k_minus_vector):
     k_plus_t += v
 
   for (m, s) in k_minus_vector:
-    m_shifted, t_shifted = 0, m - t
+    m_shifted, t_shifted = 0, abs(m - t)
     if (m_shifted,s,t_shifted) in kpe_dict_values:
       # print "kaching 3"
       v = kpe_dict_values[(m_shifted, s, t_shifted)]
@@ -136,9 +142,9 @@ def kpe_dict2(t, k_plus_vector, k_minus_vector):
 def kpe(t, k_plus_vector, k_minus_vector):
   return kpe_dict2(t, k_plus_vector, k_minus_vector)
 
+double_ues = {}
 def asimmetry_metric_kpe(s0, s1):
   should_print = True
-  kpe_dict_values = {}
   max_i = min(len(s0),len(s1))
   s0 = s0[:max_i]
   s1 = s1[:max_i]
@@ -174,8 +180,12 @@ def asimmetry_metric_kpe(s0, s1):
   # print ()
   # print (scipy.optimize.minimize_scalar(cost_function, args=(max_i,), method="Golden"))
 
-  min_w_result = scipy.optimize.minimize_scalar(cost_function, args=(max_i,), method="Golden")
-  w = min_w_result.x
+  if max_i in double_ues:
+    w = double_ues[max_i]
+  else:
+    min_w_result = scipy.optimize.minimize_scalar(cost_function, args=(max_i,), method="Golden")
+    w = min_w_result.x
+    double_ues[max_i] = w
 
   t = 0
   for i in s0:
@@ -193,31 +203,147 @@ def asimmetry_metric_kpe(s0, s1):
       s1_k_plus_gaussians += [ (t, w) ]
     t += 2
 
-  max_err = 1e-2
-  m = scipy.integrate.quad(lambda t: abs(kpe(t, s0_k_plus_gaussians, s0_k_minus_gaussians) - kpe(t, s1_k_plus_gaussians, s1_k_minus_gaussians)), 0, max_i*2-1,  epsabs=max_err, epsrel=max_err)[0]/(max_i*2)
+  def integrand(t):
+    return abs(kpe(t, s0_k_plus_gaussians, s0_k_minus_gaussians) - kpe(t, s1_k_plus_gaussians, s1_k_minus_gaussians))
+
+
+  x_values = np.arange(0, max_i*2-1, 0.125)
+  y_values = lmap(integrand, x_values)
+  # plt.plot(x_values, y_values, marker='o', color = "black")
+  # x_values2 = [x_values[i] for i in lrange(0, len(x_values), 2)]
+  # y_values2 = [y_values[i] for i in lrange(0, len(y_values), 2)]
+  # plt.plot(x_values2 , y_values2, marker='o', color = "green")
+  # x_values2 = [x_values[i] for i in lrange(0, len(x_values), 4)]
+  # y_values2 = [y_values[i] for i in lrange(0, len(y_values), 4)]
+  # plt.plot(x_values2, y_values2, marker='o', color = "red")
+  # x_values2 = [x_values[i] for i in lrange(0, len(x_values), 8)]
+  # y_values2 = [y_values[i] for i in lrange(0, len(y_values), 8)]
+  # plt.plot(x_values2, y_values2, marker='o', color = "blue")
+  # plt.show()
+
+  # max_err = 1e-2
+  # m_old = scipy.integrate.quad(integrand, 0, max_i*2-1,  epsabs=max_err, epsrel=max_err)[0]/(max_i*2-1)
+  m = scipy.integrate.simps(y_values, x_values)/(max_i*2-1)
   # , limit=100
   if should_print:
     print ("m kpe_dict2", m)
 
   if should_print:
     print ()
+  print (sys.getsizeof(kpe_dict_values))
   return m
+
+def segment_diff_integral(p1, p2, p3, p4):
+  # line equation mx+c
+  # m = delta(y)/delta(x)
+  # c = y-mx, for a give (x,y)
+  # print()
+  # print(p1, p2, p3, p4)
+  if (p1[0] != p3[0] or p2[0] != p4[0]):
+    raise Exception("Different intervals")
+
+  if (p2[0] <= p1[0]):
+    return 0.0
+
+  m0 = (p2[1] - p1[1])/(p2[0] - p1[0])
+  c0 = p1[1]-m0*p1[0]
+
+  m1 = (p4[1] - p3[1])/(p4[0] - p3[0])
+  c1 = p3[1]-m1*p3[0]
+
+  # print(m0,m1)
+  # print(c0,c1)
+
+  if (p1[1] > p3[1] and p2[1] < p4[1]) or (p1[1] < p3[1] and p2[1] > p4[1]):
+    # print("lines are crossing")
+    p_cross = ((c1-c0)/(m0-m1), (m0*c1-m1*c0)/(m0-m1))
+    # print(p_cross)
+    return ( segment_diff_integral(p1,      p_cross,  p3,       p_cross) +
+             segment_diff_integral(p_cross, p2,       p_cross,  p4) )
+  else:
+    # print("lines are not crossing")
+    i = p2[0]
+    j = p1[0]
+    value = abs( (m0-m1)/2*(i*i)+(c0-c1)*(i) -
+                ((m0-m1)/2*(j*j)+(c0-c1)*(j)) )
+    # print(value)
+    return value
+
+
+def integreate_sequence_of_segments(v0, v1):
+  # v0: list of y values, corresponding to x 0, 2, 4, ...
+  # v1: list of y values, corresponding to x 1, 3, 5, ...
+  # returns the integral of the difference between line segments
+  v0 = map(lambda x: x*1.0, v0)
+  v1 = map(lambda x: x*1.0, v1)
+  max_i = min(len(v0),len(v1))
+
+  # print (v0, v1)
+
+  acc = 0.0
+  for i in lrange(1,max_i*2):
+
+    i0 = i//2
+    i1 = i//2 - 1
+    # print (i, i0, i1)
+
+    if i % 2 == 0:
+      p1 = (i-1, (v0[i0] + v0[i0-1])/2)
+      p2 = (i, v0[i0])
+      p3 = (i-1, v1[i1])
+      p4 = (i, (v1[i1] + v1[i1+1])/2)
+    else:
+      p1 = (i-1, v0[i0])
+      p2 = (i  , (v0[i0] + v0[i0+1])/2) if i0+1 < max_i else (i, v0[i0])
+      p3 = (i-1, (v1[i1] + v1[i1+1])/2) if i1 != -1 else (i-1, v1[i1+1])
+      p4 = (i, v1[i1+1])
+
+    # print (p1, p2, p3, p4)
+    acc += segment_diff_integral(p1,p2,p3,p4)
+
+    # print(acc)
+    # print()
+
+  return acc
 
 def asimmetry_metric_simplified(s0, s1):
   max_i = min(len(s0),len(s1))
   s0 = s0[:max_i]
   s1 = s1[:max_i]
-  window = 5
-  deltas = []
-  for i in lrange(window//2, max_i - window//2):
-    delta = 0.0
-    for j in lrange(i-window//2, i+1+window//2):
-      if ( (s0[j] == None and s1[j] != None) or
-           (s0[j] != None and s1[j] == None) ):
-         delta += 1
-    deltas += [delta/window]
-  # print (deltas)
-  return np.mean(deltas)
+
+  half_window = 3
+  min_weight = 0.1
+  weights = []
+  for j in lrange(-half_window, half_window+1):
+    dist2 = j*j
+    weight = (min_weight-1)/(half_window * half_window) * dist2 + 1
+    # print (j, weight)
+    weights += [weight]
+  # div = sum(weights)
+  # print (weights)
+
+  dp0 = []
+  dp1 = []
+  for i in lrange(0, max_i):
+    dp_temp0 = 0.0
+    dp_temp1 = 0.0
+    div = 0.0
+
+    for j in lrange(max(0, i-half_window), min(max_i-1, i+half_window)+1):
+      # print(j,s0[j], j-i+half_window, weights[j-i+half_window])
+      div += weights[j-i+half_window]
+      if s0[j] != None:
+        dp_temp0 += weights[j-i+half_window]
+      if s1[j] != None:
+        dp_temp1 += weights[j-i+half_window]
+
+    dp0 += [dp_temp0/div]
+    dp1 += [dp_temp1/div]
+
+  # print (map(lambda x: "%.2f" % (x,), dp0))
+  # print (map(lambda x: "%.2f" % (x,), dp1))
+
+  return integreate_sequence_of_segments(dp0, dp1)/(max_i*2)
 
 
 def interpolate(d, interval=1, window=2, avg_method="Even"):
@@ -458,6 +584,45 @@ def test_pair_up():
   (n1, _, _), (n0, _, _) = pair_up((n0,n0,n0,tuple()), (n1,n1,n1,tuple()))
   print (lzip(n1, n0) == [(None, None), (None, None), (None, None), (4, None), (None, None), (None, None), (7, None)])
 
+def test_integrals():
+  p1 = (0,0.0)
+  p2 = (1,1.0)
+  p3 = (0,1.0)
+  p4 = (1,2.0)
+  print (segment_diff_integral(p1, p2, p3, p4) == 1)
+  p1 = (0,0.0)
+  p2 = (1,1.0)
+  p3 = (0,1.0)
+  p4 = (1,10.0)
+  print (segment_diff_integral(p1, p2, p3, p4) == 5)
+  p1 = (3,0.0)
+  p2 = (4,1.0)
+  p3 = (3,1.0)
+  p4 = (4,10.0)
+  print (segment_diff_integral(p1, p2, p3, p4) == 5)
+  p1 = (0,1.0)
+  p2 = (1,0.0)
+  p3 = (0,0.0)
+  p4 = (1,1.0)
+  print (segment_diff_integral(p1, p2, p3, p4) == 0.5)
+  p1 = (3,2.0)
+  p2 = (4,1.0)
+  p3 = (3,1.0)
+  p4 = (4,2.0)
+  print (segment_diff_integral(p1, p2, p3, p4) == 0.5)
+  p1 = (3,2.0)
+  p2 = (4,1.0)
+  p3 = (3,1.0)
+  p4 = (4,11.0)
+  print (int(100*segment_diff_integral(p1, p2, p3, p4)) == 459)
+  p1 = (3,2.0)
+  p2 = (5,1.0)
+  p3 = (3,1.0)
+  p4 = (5,2.0)
+  print (segment_diff_integral(p1, p2, p3, p4) == 1)
+  print (integreate_sequence_of_segments(range(0, 10, 2),range(1,10, 2))==1)
+  print (integreate_sequence_of_segments(range(0, 10, 2),range(2,12, 2))==10)
+
 
 def test_asimmetry_metric():
   mylen = 4
@@ -474,23 +639,46 @@ def test_asimmetry_metric():
           s_test_1[k] = None
       m = asimmetry_metric_kpe(s_test_0, s_test_1)
       metrics += [m]
+      print(m, asimmetry_metric_simplified(s_test_0, s_test_1))
   # print (metrics)
+  # return
   for i in sorted(set(metrics)):
     print ("%3.8f" % (i,), metrics.count(i))
 
   mylens = [8, 10, 12, 14]
   mylens = [7, 9, 11, 13, 15, 100,]# 500, 1000]
+  # mylens = [3600]
   metrics = []
   for l in mylens:
     s_test_0 = [None]*(l//2) + lrange(l//2 + 1, l+1)
     s_test_1 = lrange(1, (l+1)//2 + 1) + [None]*(l//2)
+    m = asimmetry_metric_kpe(s_test_0, s_test_1)
+    metrics += [ m ]
+    print(m, asimmetry_metric_simplified(s_test_0, s_test_1))
+
+    # Random test
+    # s_test_0 = []
+    # s_test_1 = []
+    # count = 1
+    # while len(s_test_0) < l:
+    #   if random.random() > 0.5:
+    #     s_test_0 += [None]
+    #   else:
+    #     s_test_0 += [count]
+    #
+    #   if random.random() > 0.5:
+    #     s_test_1 += [None]
+    #   else:
+    #     s_test_1 += [count]
+    #
+    #   count += 1
+    # m = asimmetry_metric_kpe(s_test_0, s_test_1)
+    # metrics += [ m ]
 
     # s_test_0 = [None]*((l+1)//2) + lrange((l+1)//2 + 1, l+1)
     # s_test_1 = lrange(1, (l)//2 + 1) + [None]*((l+1)//2)
-    print (s_test_0)
-    print (s_test_1)
-    m = asimmetry_metric_kpe(s_test_0, s_test_1)
-    metrics += [ m ]
+    # print (s_test_0)
+    # print (s_test_1)
   # print metrics
   for i in metrics:
     print (i)
@@ -517,9 +705,8 @@ def test_interpolate():
                        2.25, 2.25, 2.25, 2.25, 2.25, 1.0, 1.75, 1.0, 1.0, 1.0])
 ################################################################################
 
-def parse_twofiles(fname0, fname1, n_data_points=None):
+def parse_twofiles(fname0, fname1, n_data_points=None, should_print = False):
   should_plot = False
-  should_print = False
   # fname0 = "node0.log"
   # fname1 = "node1.log"
   n0 = parsefile(fname0)
@@ -558,9 +745,10 @@ def parse_twofiles(fname0, fname1, n_data_points=None):
   delivery_streak_avg1, delivery_streak_stdev1 = average_delivery_streak(s1)
   if should_print: print ("average_delivery_streak(s1):", delivery_streak_avg1, delivery_streak_stdev1)
   asimmetry_metric = -1
-  asimmetry_metric = asimmetry_metric_kpe(s0, s1)
+  # asimmetry_metric = asimmetry_metric_kpe(s0, s1)
   if should_print: print ("asimmetry_metric based on expected instant probabilities:", asimmetry_metric)
   asimmetry_metric2 = asimmetry_metric_simplified(s0, s1)
+  if should_print: print ("asimmetry_metric simplified:", asimmetry_metric2)
 
   if should_plot:
     plt.plot(lrange(len(s0)), lmap(lambda x: None if x == None else 1.1, s0), label="s0", marker='o', color = "blue")
@@ -670,15 +858,24 @@ if __name__ == "__main__":
   # test_pair_up()
   # test_asimmetry_metric()
   # test_interpolate()
+  # test_integrals()
   #
   # exit()
 
+  if len(sys.argv) > 1:
+    for f in sys.argv[1:]:
+      try:
+        print ("\nProcessing:", f + "node0.log", f + "node1.log")
+        result = parse_twofiles(f + "node0.log", f + "node1.log", n_data_points=36000, should_print = True)
+      except IOError as e:
+        print ("Could not open file:", e, file=sys.stderr)
+    exit()
+
   distance = ("moderate", "close", "far")
-  power = ("1x1", "1x2" )#"3x1", "3x3", ) # PA-LEVEL, value set at cc2420_set_txpower()
-  # relative_position = ("upup", "updown")
+  power = ("1x1", "1x2", "3x3", "3x4", "7x7") # PA-LEVEL, value set at cc2420_set_txpower()
   relative_position = ("BxT", "TxB", "LxR")
   location = ("indoor", )#"outdoor")
-  reps = lmap(str, range(1,3))
+  reps = lmap(str, range(1,2))
   factors = (distance, power, relative_position, location, reps)
   identifiers = ("D", "P", "R", "L", "i")
   identifiers_labels = {"D":"distance", "P":"power", "R":"relative position",
